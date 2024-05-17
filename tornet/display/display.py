@@ -23,6 +23,7 @@ import pathlib
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
 from matplotlib.colors import ListedColormap, LinearSegmentedColormap
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
@@ -91,6 +92,89 @@ def plot_radar(data: Dict[str,Any],
             fig.colorbar(im,location='right',shrink=.5,label= get_label(c))
         if include_title:
             ax.set_title(c)
+
+
+def animate_radar(data_loader,
+                  channels: List[str] = ['DBZ'],
+                  fig: plt.Figure = None,
+                  sweep_idx: List[int] = None,
+                  include_cbar: bool = False,
+                  include_title: bool = True,
+                  n_rows: int = None,
+                  n_cols: int = None,
+                  interval: int = 200):
+    if fig is None:
+        fig = plt.figure(figsize=(12, 6))
+    if sweep_idx is None:
+        sweep_idx = len(channels) * [0]
+
+    # Initialize the axes once
+    ax_list = []
+    cbar_list = [None] * len(channels)  # Keep track of colorbars
+    for k, c in enumerate(channels):
+        if n_rows is None:
+            ax = fig.add_subplot(1, len(channels), k + 1, polar=True)
+        else:
+            ax = fig.add_subplot(n_rows, n_cols, k + 1, polar=True)
+        ax.set_theta_zero_location('N')
+        ax.set_theta_direction(-1)
+        ax.grid(False)
+        if include_title:
+            ax.set_title(c)
+        ax_list.append(ax)
+
+    def update(sample_idx):
+        data = data_loader[sample_idx]
+        for k, c in enumerate(channels):
+            ax = ax_list[k]
+            ax.clear()
+            ax.set_theta_zero_location('N')
+            ax.set_theta_direction(-1)
+            ax.grid(False)
+            if include_title:
+                ax.set_title(c)
+
+            x = data[channels[0]]
+            print(f"Sample {sample_idx}, Channel {c}, Data shape: {x.shape}")
+            na, nr = x.shape[1], x.shape[2]
+
+            bidx = lambda a: a[0]
+            az_min = np.float64(bidx(data['az_lower'])) * np.pi / 180
+            az_max = np.float64(bidx(data['az_upper'])) * np.pi / 180
+            rmin = np.float64(bidx(data['rng_lower'])) / 1e3
+            rmax = np.float64(bidx(data['rng_upper'])) / 1e3
+
+            T = np.linspace(az_min, az_max, na)
+            R = np.linspace(rmin, rmax, nr)
+            R, T = np.meshgrid(R, T)
+
+            Z = np.float64(bidx(data[c])[..., sweep_idx[k]])
+            print(f"Z shape: {Z.shape}")
+            cmap, norm = get_cmap(c)
+            im = ax.pcolormesh(T, R - rmin, Z, shading='nearest', cmap=cmap, norm=norm)
+
+            ax.set_rorigin(-rmin)
+            ax.set_thetalim([az_min, az_max])
+            rt = np.linspace(0, rmax - rmin, 6)
+            ax.set_rgrids(rt, labels=(rt + rmin).astype(np.int64))
+            ax.set_xticklabels([])
+            ax.set_yticklabels([])
+
+            # Manage colorbars: Only create if it doesn't exist
+            if include_cbar:
+                if cbar_list[k] is None:
+                    cbar = fig.colorbar(im, ax=ax, shrink=.5, label=get_label(c))
+                    cbar_list[k] = cbar
+                else:
+                    # Update colorbar for the current image
+                    cbar = cbar_list[k]
+                    cbar.update_normal(im)
+
+        return ax_list
+
+    ani = FuncAnimation(fig, update, frames=40, blit=False, interval=interval)
+    return ani
+
 
 
 def get_label(c):
@@ -505,4 +589,3 @@ def get_cc_cmap():
     cmap.set_under([.9,.9,.9])
     cmap.set_over([0,0,0])
     return cmap,norm
-

@@ -5,3 +5,6 @@ __pycache__/
 *.egg-info
 experiments/
 lightning_logs/
+.vscode/
+build/
+data/
