@@ -17,6 +17,9 @@ Tools for visualizing data
 
 from typing import Dict, List, Any
 import matplotlib.pyplot as plt
+from time import sleep
+from tqdm import tqdm
+
 import numpy as np
 import pickle
 import pathlib
@@ -26,6 +29,8 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from matplotlib.colors import ListedColormap, LinearSegmentedColormap
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+
 
 
 def plot_radar(data: Dict[str,Any],
@@ -110,7 +115,8 @@ def animate_radar(data_loader,
 
     # Initialize the axes once
     ax_list = []
-    cbar_list = [None] * len(channels)  # Keep track of colorbars
+    cbar_list = [None] * len(channels)
+    
     for k, c in enumerate(channels):
         if n_rows is None:
             ax = fig.add_subplot(1, len(channels), k + 1, polar=True)
@@ -130,49 +136,52 @@ def animate_radar(data_loader,
             ax.clear()
             ax.set_theta_zero_location('N')
             ax.set_theta_direction(-1)
-            ax.grid(False)
-            if include_title:
-                ax.set_title(c)
 
-            x = data[channels[0]]
-            print(f"Sample {sample_idx}, Channel {c}, Data shape: {x.shape}")
+            # Get azimuth and range limits for the current frame
+            az_min = np.float64(data['az_lower'][0]) * np.pi / 180
+            az_max = np.float64(data['az_upper'][0]) * np.pi / 180
+            rmin = np.float64(data['rng_lower'][0]) / 1e3
+            rmax = np.float64(data['rng_upper'][0]) / 1e3
+
+            x = data[channels[0]]  # Assuming the shape is the same for all channels
             na, nr = x.shape[1], x.shape[2]
-
-            bidx = lambda a: a[0]
-            az_min = np.float64(bidx(data['az_lower'])) * np.pi / 180
-            az_max = np.float64(bidx(data['az_upper'])) * np.pi / 180
-            rmin = np.float64(bidx(data['rng_lower'])) / 1e3
-            rmax = np.float64(bidx(data['rng_upper'])) / 1e3
-
             T = np.linspace(az_min, az_max, na)
             R = np.linspace(rmin, rmax, nr)
             R, T = np.meshgrid(R, T)
 
-            Z = np.float64(bidx(data[c])[..., sweep_idx[k]])
-            print(f"Z shape: {Z.shape}")
+            # Extract and resize data
+            Z = np.float64(data[c])[..., sweep_idx[k]]
+            Z = np.ma.masked_invalid(Z)
+            if Z.shape != (na, nr):
+                Z = np.resize(Z, (na, nr))
+
             cmap, norm = get_cmap(c)
-            im = ax.pcolormesh(T, R - rmin, Z, shading='nearest', cmap=cmap, norm=norm)
+            im = ax.pcolormesh(T, R, Z, shading='nearest', cmap=cmap, norm=norm)
+            ax.set_title(f'Sample Index: {sample_idx} / {len(data_loader)}')
+            
+            ax.set_rorigin(0)
+            ax.set_thetalim(0, 2 * np.pi)  # Full 360 degrees
 
-            ax.set_rorigin(-rmin)
-            ax.set_thetalim([az_min, az_max])
-            rt = np.linspace(0, rmax - rmin, 6)
-            ax.set_rgrids(rt, labels=(rt + rmin).astype(np.int64))
-            ax.set_xticklabels([])
-            ax.set_yticklabels([])
+            # Show degrees on the outside of the circle at 45° intervals
+            ax.set_xticks(np.linspace(0, 2 * np.pi, num=8, endpoint=False))  # Set theta ticks at 45° intervals
+            ax.set_xticklabels([f'{int(tick * 180 / np.pi)}°' for tick in np.linspace(0, 2 * np.pi, num=8, endpoint=False)])
+            
+            # Remove inner circles (range grids)
+            ax.yaxis.set_visible(False)
+            ax.grid(False)
 
-            # Manage colorbars: Only create if it doesn't exist
             if include_cbar:
                 if cbar_list[k] is None:
                     cbar = fig.colorbar(im, ax=ax, shrink=.5, label=get_label(c))
                     cbar_list[k] = cbar
                 else:
-                    # Update colorbar for the current image
                     cbar = cbar_list[k]
                     cbar.update_normal(im)
 
         return ax_list
 
-    ani = FuncAnimation(fig, update, frames=40, blit=False, interval=interval)
+    ani = FuncAnimation(fig, update, frames=tqdm(range(len(data_loader))), blit=False, interval=interval)
+
     return ani
 
 
